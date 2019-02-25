@@ -17,6 +17,7 @@ import (
 
 	"crypto/aes"
 	"crypto/cipher"
+
 	// Need to run go get to get this
 	"golang.org/x/crypto/argon2"
 )
@@ -36,7 +37,7 @@ var AESKeySize = 16
 // RSA keysize
 var RSAKeySize = 2048
 
-var DebugPrint = false
+var DebugPrint = true
 
 // Helper function: Does formatted printing to stderr if
 // the DebugPrint global is set.  All our testing ignores stderr,

@@ -163,10 +163,10 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	keyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
 	marsh, err := json.Marshal(keyHash)
 	if err != nil {
-		userlib.DebugMsg("Marshal failed")
+		userlib.DebugMsg("Key Marshal failed")
 	}
 
-	// This is the final key for User struct
+	// This is the key where encrypted User struct will be stored
 	userKey := hex.EncodeToString(marsh)
 	userlib.DebugMsg(userKey)
 
@@ -222,11 +222,11 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	iv := ciphertext[:userlib.BlockSize]
 	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
-	userlib.DebugMsg("Random IV", hex.EncodeToString(iv))
+	// userlib.DebugMsg("Random IV", hex.EncodeToString(iv))
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher := userlib.CFBEncrypter(userSymKey[:16], iv)
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(user_rMarsh))
-	userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the encrypted data to Untrusted Data Store
 	userlib.DatastoreSet(userKey, ciphertext)
@@ -238,7 +238,79 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
 func GetUser(username string, password string) (userdataptr *User, err error) {
-	return
+	// Generate Key to retrieve the encrypted User data
+	passbyte := []byte(password + username)
+	saltbyte := []byte(username + "user")
+
+	// key = Argon2Key(password + username, username + "user", 10)
+	keyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	marsh, err := json.Marshal(keyHash)
+	if err != nil {
+		userlib.DebugMsg("Key Marshalling failed")
+	}
+	// This is the key where encrypted User struct is stored
+	userKey := hex.EncodeToString(marsh)
+	userlib.DebugMsg(userKey)
+
+	//
+	// Generate a Key for symmetric decryption of User_r struct
+	passbyte = []byte(username + password)
+	saltbyte = []byte(username + "salt")
+
+	// Symkey = Argon2Key(username + password, username + "salt", 10)
+	symkeyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	userSymKey, err := json.Marshal(symkeyHash)
+	if err != nil {
+		userlib.DebugMsg("Key Marshalling failed")
+	}
+
+	// This is the key to symmetrically encrypt User struct
+	userlib.DebugMsg(hex.EncodeToString(userSymKey))
+
+	//
+	// Now, retrieve and decrypt the User_r struct and check if the
+	// credentials and integrity are properly maintained.
+	ciphertext, status := userlib.DatastoreGet(userKey)
+	if status != true {
+		return nil, errors.New("User not found")
+	}
+
+	iv := ciphertext[:userlib.BlockSize]
+	cipher := userlib.CFBDecrypter(userSymKey[:16], iv)
+
+	// In place AES decryption of ciphertext
+	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], ciphertext[userlib.BlockSize:])
+	// userlib.DebugMsg("Decrypted message", string(ciphertext[userlib.BlockSize:]))
+
+	var user User_r
+	err = json.Unmarshal(ciphertext[userlib.BlockSize:], &user)
+	if err != nil {
+		userlib.DebugMsg("User_r Unmarshalling failed")
+	}
+
+	// Verify the User_r struct's integrity
+	userlib.DebugMsg(string(user.Signature))
+
+	userMarsh, err := json.Marshal(user.User)
+	if err != nil {
+		userlib.DebugMsg("User_r.User Marshal failed")
+	}
+
+	mac := userlib.NewHMAC(userSymKey)
+	mac.Write(userMarsh)
+	if !userlib.Equal(user.Signature, mac.Sum(nil)) {
+		return nil, errors.New("User Integrity check failed")
+	}
+
+	//
+	// Cool, after verifying the integrity, cross check the credentials
+	// just to be sure about user authentication
+	if username != user.User.Username || password != user.User.Password {
+		return nil, errors.New("Error: User credentials don't match")
+	}
+
+	// Everything works fine
+	return &user.User, nil
 }
 
 // This stores a file in the datastore.

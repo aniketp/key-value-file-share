@@ -30,6 +30,8 @@ func main() {
 	fmt.Printf("%#v\n", a.KeyAddr)
 
 	assn1.InitUser("apple", "mangoa")
+	_, err := assn1.GetUser("apple", "mangoa")
+	fmt.Println(err)
 
 	// f := uuid.New()
 
