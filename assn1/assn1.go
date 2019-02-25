@@ -102,7 +102,7 @@ type User_r struct {
 type User struct {
 	Username string
 	Password string
-	Privkey  PrivateKey
+	Privkey  *PrivateKey
 }
 
 type Inode_r struct {
@@ -199,7 +199,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 		User: User{
 			Username: username,
 			Password: password,
-			Privkey:  *privKey,
+			Privkey:  privKey,
 		},
 	}
 
@@ -289,8 +289,6 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	// Verify the User_r struct's integrity
-	userlib.DebugMsg(string(user.Signature))
-
 	userMarsh, err := json.Marshal(user.User)
 	if err != nil {
 		userlib.DebugMsg("User_r.User Marshal failed")
@@ -309,6 +307,10 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		return nil, errors.New("Error: User credentials don't match")
 	}
 
+	if userKey != user.KeyAddr {
+		return nil, errors.New("Error: Key-Value-Swap Attack")
+	}
+
 	// Everything works fine
 	return &user.User, nil
 }
@@ -316,7 +318,69 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // This stores a file in the datastore.
 //
 // The name of the file should NOT be revealed to the datastore!
-func (userdata *User) StoreFile(filename string, data []byte) {
+func (user *User) StoreFile(filename string, data []byte) {
+	// Generate Key to store the File Inode
+	passbyte := []byte((*user).Password + filename)
+	saltbyte := []byte((*user).Username + filename)
+
+	// key = Argon2Key(password + filename, username + filename, 10)
+	keyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	marsh, err := json.Marshal(keyHash)
+	if err != nil {
+		userlib.DebugMsg("Key Marshalling failed")
+	}
+	// This is the key where encrypted Inode struct for "filename" is stored
+	fileKey := hex.EncodeToString(marsh)
+	userlib.DebugMsg("fileKey " + fileKey)
+
+	//
+	// Initialize the User structure without any signature
+	//
+
+	// Generate a random Initialization Vector and random address for
+	// encryption of SharingRecord Structure
+	iv := make([]byte, userlib.BlockSize)
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	address := hex.EncodeToString(randbyte[:16])
+
+	file := &Inode_r{
+		KeyAddr: fileKey, // The key at which this struct will be stored
+		Inode: Inode{
+			Filename:     filename,
+			ShRecordAddr: address,
+			InitVector:   iv,
+			SymmKey:      randbyte[:16],
+		},
+	}
+
+	// Store the signature of User_r.User in User_r.Signature
+	fileMarsh, err := json.Marshal(file.Inode)
+	if err != nil {
+		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+	}
+
+	file.Signature, err = userlib.RSASign(user.Privkey, fileMarsh)
+	if err != nil {
+		userlib.DebugMsg("RSA Signing of Inode_r.Inode failed")
+	}
+
+	// Finally, encrypt the whole Inode_r struct with User's Public key
+	inodeMarsh, err := json.Marshal(file)
+	if err != nil {
+		userlib.DebugMsg("Inode_r Marshalling failed")
+	}
+
+	// RSA Asymmetric Key Encryption
+	encrypted, err := userlib.RSAEncrypt(&user.Privkey.PublicKey,
+		inodeMarsh, []byte("Tag"))
+	if err != nil {
+		userlib.DebugMsg("RSA Encryption of Inode_r failed")
+	}
+
+	userlib.DatastoreDelete(fileKey)
+	userlib.DatastoreSet(fileKey, encrypted)
 }
 
 // This adds on to an existing file.

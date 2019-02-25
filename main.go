@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"github.com/aasis21/encrypted_dropbox/assn1"
+	"github.com/aasis21/encrypted_dropbox/userlib"
 	"github.com/google/uuid"
 )
 
@@ -30,8 +33,15 @@ func main() {
 	fmt.Printf("%#v\n", a.KeyAddr)
 
 	assn1.InitUser("apple", "mangoa")
-	_, err := assn1.GetUser("apple", "mangoa")
-	fmt.Println(err)
+	user, err := assn1.GetUser("apple", "mangoa")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	user.StoreFile("mango", []byte("asds"))
+
+	apple, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	fmt.Println(hex.EncodeToString(apple[:16]))
 
 	// f := uuid.New()
 
