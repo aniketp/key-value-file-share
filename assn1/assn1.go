@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Ashish Kumar <akashish@iitk.ac.in>
+// Copyright (c) 2019 Aniket Pandey <aniketp@iitk.ac.in>
+
 package assn1
 
 // You MUST NOT change what you import.  If you add ANY additional
@@ -7,6 +10,7 @@ import (
 
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
+
 	"github.com/fenilfadadu/CS628-assn1/userlib"
 
 	// Life is much easier with json:  You are
@@ -54,7 +58,8 @@ func someUsefulThings() {
 	userlib.DebugMsg("Unmashaled data %v", g.String())
 
 	// This creates an error type
-	userlib.DebugMsg("Creation of error %v", errors.New(strings.ToTitle("This is an error")))
+	userlib.DebugMsg("Creation of error %v",
+		errors.New(strings.ToTitle("This is an error")))
 
 	// And a random RSA key.  In this case, ignoring the error
 	// return value
@@ -72,13 +77,67 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 	return
 }
 
-// The structure definition for a user record
+// // The structure definition for a user record
+// type User struct {
+// 	Username string
+// 	Password string
+
+// 	// Some components for the private keys
+
+// 	// You can add other fields here if you want...
+// 	// Note for JSON to marshal/unmarshal, the fields need to
+// 	// be public (start with a capital letter)
+// }
+
+/////////////////// Assignment
+
+type PrivateKey = userlib.PrivateKey
+
+type User_r struct {
+	KeyAddr   string
+	Signature []byte
+	User
+}
+
 type User struct {
 	Username string
-	// You can add other fields here if you want...
-	// Note for JSON to marshal/unmarshal, the fields need to
-	// be public (start with a capital letter)
+	Password string
+	Privkey  PrivateKey
 }
+
+type Inode_r struct {
+	KeyAddr   string
+	Signature []byte
+	Inode
+}
+
+type Inode struct {
+	Filename     string
+	ShRecordAddr string
+	InitVector   []byte
+	SymmKey      []byte
+}
+
+type SharingRecord_r struct {
+	KeyAddr   string
+	Signature []byte
+	SharingRecord
+}
+
+type SharingRecord struct {
+	Type       string
+	MainAuthor string
+	Address    []string
+	SymmKey    [][]byte
+}
+
+type Data_r struct {
+	KeyAddr   string
+	Value     []byte
+	Signature []byte
+}
+
+/////////////////
 
 // This creates a user.  It will only be called once for a user
 // (unless the keystore and datastore are cleared during testing purposes)
@@ -96,6 +155,45 @@ type User struct {
 
 // You can assume the user has a STRONG password
 func InitUser(username string, password string) (userdataptr *User, err error) {
+	// Generate Key to store the encrypted User data
+	passbyte := []byte(password + username)
+	saltbyte := []byte(username + "user")
+
+	// key = Argon2Key(password + username, username + "user", 10)
+	keyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	marsh, err := json.Marshal(keyHash)
+	if err != nil {
+		userlib.DebugMsg("Marshal failed")
+	}
+
+	// This is the final key for User struct
+	userKey := hex.EncodeToString(marsh)
+	userlib.DebugMsg(userKey)
+
+	// Generate RSA Public-Private Key Pair for the User
+	privKey, err := userlib.GenerateRSAKey()
+	if err != nil {
+		userlib.DebugMsg("RSA Key-Pair generation failed")
+	}
+
+	// Push the RSA Public Key to secure Key-Store
+	userlib.KeystoreSet(username, privKey.PublicKey)
+
+	// Generate a Key for symmetric encryption of User_r struct
+	passbyte = []byte(username + password)
+	saltbyte = []byte(username + "salt")
+
+	// Symkey = Argon2Key(username + password, username + "salt", 10)
+	symkeyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	marsh, err = json.Marshal(symkeyHash)
+	if err != nil {
+		userlib.DebugMsg("Marshal failed")
+	}
+
+	// This is the key to symmetrically encrypt User struct
+	userSymKey := hex.EncodeToString(marsh)
+	userlib.DebugMsg(userSymKey)
+
 	var userdata User
 	return &userdata, err
 }
@@ -142,7 +240,7 @@ type sharingRecord struct {
 // for reading/appending.
 
 // Note that neither the recipient NOR the datastore should gain any
-// information about what the sender calls the file.  Only the
+// information about hat the sender calls the file.  Only the
 // recipient can access the sharing record, and only the recipient
 // should be able to know the sender.
 
