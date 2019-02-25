@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/fenilfadadu/CS628-assn1/assn1"
+	"github.com/aasis21/encrypted_dropbox/assn1"
 	"github.com/google/uuid"
 )
 

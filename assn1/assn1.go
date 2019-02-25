@@ -185,17 +185,53 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	// Symkey = Argon2Key(username + password, username + "salt", 10)
 	symkeyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
-	marsh, err = json.Marshal(symkeyHash)
+	userSymKey, err := json.Marshal(symkeyHash)
 	if err != nil {
 		userlib.DebugMsg("Marshal failed")
 	}
 
 	// This is the key to symmetrically encrypt User struct
-	userSymKey := hex.EncodeToString(marsh)
-	userlib.DebugMsg(userSymKey)
+	userlib.DebugMsg(hex.EncodeToString(userSymKey))
 
-	var userdata User
-	return &userdata, err
+	// Initialize the User structure without any signature
+	user := &User_r{
+		KeyAddr: userKey, // The key at which this struct will be stored
+		User: User{
+			Username: username,
+			Password: password,
+			Privkey:  *privKey,
+		},
+	}
+
+	// Store the signature of User_r.User in User_r.Signature
+	userMarsh, err := json.Marshal(user.User)
+	if err != nil {
+		userlib.DebugMsg("User_r.User Marshal failed")
+	}
+	mac := userlib.NewHMAC(userSymKey)
+	mac.Write(userMarsh)
+	user.Signature = mac.Sum(nil)
+
+	// Finally, encrypt the whole thing
+	user_rMarsh, err := json.Marshal(user)
+	if err != nil {
+		userlib.DebugMsg("User_r Marshal failed")
+	}
+
+	ciphertext := make([]byte, userlib.BlockSize+len(user_rMarsh))
+	iv := ciphertext[:userlib.BlockSize]
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	userlib.DebugMsg("Random IV", hex.EncodeToString(iv))
+	// NOTE: The "key" needs to be of 16 bytes
+	cipher := userlib.CFBEncrypter(userSymKey[:16], iv)
+	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(user_rMarsh))
+	userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+
+	// Push the encrypted data to Untrusted Data Store
+	userlib.DatastoreSet(userKey, ciphertext)
+
+	return &user.User, nil
 }
 
 // This fetches the user information from the Datastore.  It should
