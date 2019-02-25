@@ -131,7 +131,7 @@ type SharingRecord struct {
 	SymmKey    [][]byte
 }
 
-type Data_r struct {
+type Data struct {
 	KeyAddr   string
 	Value     []byte
 	Signature []byte
@@ -381,6 +381,97 @@ func (user *User) StoreFile(filename string, data []byte) {
 
 	userlib.DatastoreDelete(fileKey)
 	userlib.DatastoreSet(fileKey, encrypted)
+
+	//
+	// Time to create a "SharingRecord" structure
+	var addr []string
+	var keys [][]byte
+
+	// Generate a random Initialization Vector and random address for
+	// encryption of SharingRecord Structure
+	iv = make([]byte, userlib.BlockSize)
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	randbyte, _ = json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	address = hex.EncodeToString(randbyte[:16])
+
+	// Here, we append the first block of data to the list of blocks
+	// The address and the encryption key for the block
+	addr = append(addr, address)
+	keys = append(keys, randbyte[:16])
+
+	shrecord := &SharingRecord_r{
+		KeyAddr: file.Inode.ShRecordAddr, // The key at which this struct will be stored
+		SharingRecord: SharingRecord{
+			Type:       "Sharing Record",
+			MainAuthor: user.Username,
+			Address:    addr,
+			SymmKey:    keys,
+		},
+	}
+
+	// HMAC Signature via symmetric keys
+	// Store the signature of SharingRecord_r.SharingRecord in Signature
+	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
+	if err != nil {
+		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+	}
+	mac := userlib.NewHMAC(file.Inode.SymmKey)
+	mac.Write(shrMarsh)
+	shrecord.Signature = mac.Sum(nil)
+
+	// Finally, encrypt the whole SharingRecord_r structure
+	shrecord_rMarsh, err := json.Marshal(shrecord)
+	if err != nil {
+		userlib.DebugMsg("SharingRecord_r Marshalling failed")
+	}
+
+	ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
+	iv = ciphertext[:userlib.BlockSize]
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	// NOTE: The "key" needs to be of 16 bytes
+	cipher := userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
+	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
+	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+
+	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
+	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
+	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
+
+	//
+	// Time to create the initial data block and store it's signature
+	dbkey := shrecord.SharingRecord.SymmKey[0]
+
+	// HMAC Signature of data block via symmetric key
+	mac = userlib.NewHMAC(dbkey)
+	mac.Write(data)
+
+	dblock := &Data{
+		// The key at which this struct will be stored
+		KeyAddr:   shrecord.SharingRecord.Address[0],
+		Value:     data,
+		Signature: mac.Sum(nil),
+	}
+
+	// Finally, encrypt the whole data block using Symmetric Key
+	dblockMarsh, err := json.Marshal(dblock)
+	if err != nil {
+		userlib.DebugMsg("Data block Marshalling failed")
+	}
+
+	cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
+	iv = cipherdata[:userlib.BlockSize]
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	// NOTE: The "key" needs to be of 16 bytes
+	cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
+	cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
+
+	// Push the AES-CFB Encrypted data block structure to Data Store
+	userlib.DatastoreDelete(shrecord.SharingRecord.Address[0])
+	userlib.DatastoreSet(shrecord.SharingRecord.Address[0], cipherdata)
+
 }
 
 // This adds on to an existing file.
