@@ -114,7 +114,6 @@ type Inode_r struct {
 type Inode struct {
 	Filename     string
 	ShRecordAddr string
-	InitVector   []byte
 	SymmKey      []byte
 }
 
@@ -319,6 +318,10 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 //
 // The name of the file should NOT be revealed to the datastore!
 func (user *User) StoreFile(filename string, data []byte) {
+	///////////////////////////////////////
+	//           INODE STRUCTURE         //
+	///////////////////////////////////////
+
 	// Generate Key to store the File Inode
 	passbyte := []byte((*user).Password + filename)
 	saltbyte := []byte((*user).Username + filename)
@@ -334,7 +337,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	userlib.DebugMsg("fileKey " + fileKey)
 
 	//
-	// Initialize the User structure without any signature
+	// Initialize the Inode structure without any signature (at the moment)
 	//
 
 	// Generate a random Initialization Vector and random address for
@@ -350,7 +353,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 		Inode: Inode{
 			Filename:     filename,
 			ShRecordAddr: address,
-			InitVector:   iv,
 			SymmKey:      randbyte[:16],
 		},
 	}
@@ -372,25 +374,41 @@ func (user *User) StoreFile(filename string, data []byte) {
 		userlib.DebugMsg("Inode_r Marshalling failed")
 	}
 
-	// RSA Asymmetric Key Encryption
-	encrypted, err := userlib.RSAEncrypt(&user.Privkey.PublicKey,
-		inodeMarsh, []byte("Tag"))
-	if err != nil {
-		userlib.DebugMsg("RSA Encryption of Inode_r failed")
+	// To store encrypted chunks
+	var encrypted [][]byte
+	var encryptedBlock []byte
+	index := 0
+
+	for index < len(inodeMarsh) {
+		// RSA Asymmetric Key Encryption
+		encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
+			inodeMarsh[index:index+190], []byte("Tag"))
+		if err != nil {
+			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+		}
+		index += 190
+		encrypted = append(encrypted, encryptedBlock)
 	}
 
+	encryptedMarsh, err := json.Marshal(encrypted)
+	if err != nil {
+		userlib.DebugMsg("Marshalling of encrypted blocks failed")
+	}
+
+	// TODO: Optimize this at the end via channels
 	userlib.DatastoreDelete(fileKey)
-	userlib.DatastoreSet(fileKey, encrypted)
+	userlib.DatastoreSet(fileKey, encryptedMarsh)
 
 	//
-	// Time to create a "SharingRecord" structure
+	///////////////////////////////////////
+	//      SHARINGRECORD STRUCTURE      //
+	///////////////////////////////////////
+
 	var addr []string
 	var keys [][]byte
 
 	// Generate a random Initialization Vector and random address for
 	// encryption of SharingRecord Structure
-	iv = make([]byte, userlib.BlockSize)
-	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
 	randbyte, _ = json.Marshal(userlib.RandomBytes(userlib.BlockSize))
 	address = hex.EncodeToString(randbyte[:16])
@@ -440,7 +458,9 @@ func (user *User) StoreFile(filename string, data []byte) {
 	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
 
 	//
-	// Time to create the initial data block and store it's signature
+	///////////////////////////////////////
+	//           DATA STRUCTURE          //
+	///////////////////////////////////////
 	dbkey := shrecord.SharingRecord.SymmKey[0]
 
 	// HMAC Signature of data block via symmetric key
@@ -481,6 +501,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 // metadata you need.
 
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
+
 	return
 }
 

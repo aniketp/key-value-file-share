@@ -1,12 +1,9 @@
 package main
 
 import (
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 
 	"github.com/aasis21/encrypted_dropbox/assn1"
-	"github.com/aasis21/encrypted_dropbox/userlib"
 	"github.com/google/uuid"
 )
 
@@ -39,9 +36,6 @@ func main() {
 	}
 
 	user.StoreFile("mango", []byte("asds"))
-
-	apple, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
-	fmt.Println(hex.EncodeToString(apple[:16]))
 
 	// f := uuid.New()
 
