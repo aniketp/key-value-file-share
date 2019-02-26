@@ -35,8 +35,10 @@ func main() {
 		fmt.Println(err)
 	}
 
-	user.StoreFile("mango", []byte("asds"))
-	err = user.AppendFile("mango", []byte("asdsasdsad"))
+	user.StoreFile("mango", []byte("apple"))
+	err = user.AppendFile("mango", []byte("mango"))
+	data, err := user.LoadFile("mango")
+	fmt.Println(string(data))
 
 	// applae := [][]byte{[]byte("Mango"), []byte("sadas")}
 	// app := make([]byte, len(applae)-2)
