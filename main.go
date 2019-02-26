@@ -36,6 +36,14 @@ func main() {
 	}
 
 	user.StoreFile("mango", []byte("asds"))
+	err = user.AppendFile("mango", []byte("asdsasdsad"))
+
+	// applae := [][]byte{[]byte("Mango"), []byte("sadas")}
+	// app := make([]byte, len(applae)-2)
+
+	// app = append(app, applae[0]...)
+	// app = append(app, applae[1]...)
+	// fmt.Println(applae[0], applae[1], app)
 
 	// f := uuid.New()
 

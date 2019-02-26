@@ -1,5 +1,5 @@
-// Copyright (c) 2019 Ashish Kumar <akashish@iitk.ac.in>
 // Copyright (c) 2019 Aniket Pandey <aniketp@iitk.ac.in>
+// Copyright (c) 2019 Ashish Kumar <akashish@iitk.ac.in>
 
 package assn1
 
@@ -134,6 +134,10 @@ type Data struct {
 	KeyAddr   string
 	Value     []byte
 	Signature []byte
+}
+
+func remove(slice []byte, s int) []byte {
+	return append(slice[:s], slice[s+1:]...)
 }
 
 /////////////////
@@ -379,7 +383,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	var encryptedBlock []byte
 	index := 0
 
-	for index < len(inodeMarsh) {
+	for index+190 <= len(inodeMarsh) {
 		// RSA Asymmetric Key Encryption
 		encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
 			inodeMarsh[index:index+190], []byte("Tag"))
@@ -389,6 +393,14 @@ func (user *User) StoreFile(filename string, data []byte) {
 		index += 190
 		encrypted = append(encrypted, encryptedBlock)
 	}
+
+	// In case the final chunk is not a multiple of 190
+	encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
+		inodeMarsh[index:], []byte("Tag"))
+	if err != nil {
+		userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+	}
+	encrypted = append(encrypted, encryptedBlock)
 
 	encryptedMarsh, err := json.Marshal(encrypted)
 	if err != nil {
@@ -408,8 +420,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	var keys [][]byte
 
 	// Generate a random Initialization Vector and random address for
-	// encryption of SharingRecord Structure
-
+	// encryption of Data Block to be stored in SharingRecord structure
 	randbyte, _ = json.Marshal(userlib.RandomBytes(userlib.BlockSize))
 	address = hex.EncodeToString(randbyte[:16])
 
@@ -417,6 +428,8 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// The address and the encryption key for the block
 	addr = append(addr, address)
 	keys = append(keys, randbyte[:16])
+
+	// fmt.Println(len(address), len(randbyte[:16]))
 
 	shrecord := &SharingRecord_r{
 		KeyAddr: file.Inode.ShRecordAddr, // The key at which this struct will be stored
@@ -499,10 +512,178 @@ func (user *User) StoreFile(filename string, data []byte) {
 // Append should be efficient, you shouldn't rewrite or reencrypt the
 // existing file, but only whatever additional information and
 // metadata you need.
+func (user *User) AppendFile(filename string, data []byte) (err error) {
+	///////////////////////////////////////
+	//           INODE STRUCTURE         //
+	///////////////////////////////////////
 
-func (userdata *User) AppendFile(filename string, data []byte) (err error) {
+	// Retrieve the Key where File Inode is stored
+	passbyte := []byte((*user).Password + filename)
+	saltbyte := []byte((*user).Username + filename)
 
-	return
+	// key = Argon2Key(password + filename, username + filename, 10)
+	keyHash := userlib.Argon2Key(passbyte, saltbyte, 10)
+	marsh, err := json.Marshal(keyHash)
+	if err != nil {
+		userlib.DebugMsg("Key Marshalling failed")
+	}
+	// This is the key where encrypted Inode struct for "filename" is stored
+	fileKey := hex.EncodeToString(marsh)
+	userlib.DebugMsg("fileKey " + fileKey)
+
+	// Retrieve the encrypted Inode structure from DataStore
+	rsaEncrypted, status := userlib.DatastoreGet(fileKey)
+	if status != true {
+		return errors.New("Filename not found")
+	}
+
+	var encrypted [][]byte
+	err = json.Unmarshal(rsaEncrypted, &encrypted)
+	if err != nil {
+		userlib.DebugMsg("Inode_r Unmarshalling failed")
+	}
+
+	// Retreive the Marshalled Inode_r struct from the encrypted chunks
+	index := 0
+	inodeMarsh := make([]byte, len(encrypted))
+	for index < len(encrypted) {
+		// RSA Asymmetric Key Decryption
+		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
+			encrypted[index], []byte("Tag"))
+		if err != nil {
+			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+		}
+
+		inodeMarsh = append(inodeMarsh, decryptedBlock...)
+		index += 1
+	}
+
+	// Remove leading \x00 characters from inodeMarsh
+	for inodeMarsh[0] == []byte("\x00")[0] {
+		inodeMarsh = remove(inodeMarsh, 0)
+	}
+
+	var file Inode_r
+	err = json.Unmarshal(inodeMarsh, &file)
+	if err != nil {
+		userlib.DebugMsg("Inode_r Unmarshalling failed, ", err)
+	}
+
+	// Verify Inode structure's integrity
+	fileMarsh, err := json.Marshal(file.Inode)
+	if err != nil {
+		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+	}
+
+	err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
+	if err != nil {
+		return errors.New("Inode Integrity Check failed")
+	}
+
+	//
+	///////////////////////////////////////
+	//      SHARINGRECORD STRUCTURE      //
+	///////////////////////////////////////
+	// Retrieve encrypted SharingRecord structure from DataStore
+	shrCipher, status := userlib.DatastoreGet(file.Inode.ShRecordAddr)
+	if !status {
+		return errors.New("Sharing Record Structure can't be found")
+	}
+
+	iv := shrCipher[:userlib.BlockSize]
+	cipher := userlib.CFBDecrypter(file.Inode.SymmKey, iv)
+
+	// In place AES decryption of ciphertext
+	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
+	// userlib.DebugMsg("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+
+	var shrecord SharingRecord_r
+	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
+	if err != nil {
+		userlib.DebugMsg("SharingRecord_r Unmarshalling failed, ", err)
+	}
+
+	// Appending a new block
+	// Generate a random Initialization Vector and random address for
+	// encryption of Data Block to be stored in SharingRecord structure
+	randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	address := hex.EncodeToString(randbyte[:16])
+
+	shrecord.SharingRecord.Address = append(shrecord.SharingRecord.Address, address)
+	shrecord.SharingRecord.SymmKey = append(shrecord.SharingRecord.SymmKey, randbyte[:16])
+
+	//
+	// Now, Store the modified, encrypted and re-signed SharingRecord structure
+	// back to the DataStore
+	//
+
+	// HMAC Signature via symmetric keys
+	// Store the signature of SharingRecord_r.SharingRecord in Signature
+	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
+	if err != nil {
+		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+	}
+	mac := userlib.NewHMAC(file.Inode.SymmKey)
+	mac.Write(shrMarsh)
+	shrecord.Signature = mac.Sum(nil)
+
+	// Finally, encrypt the whole SharingRecord_r structure
+	shrecord_rMarsh, err := json.Marshal(shrecord)
+	if err != nil {
+		userlib.DebugMsg("SharingRecord_r Marshalling failed")
+	}
+
+	ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
+	iv = ciphertext[:userlib.BlockSize]
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	// NOTE: The "key" needs to be of 16 bytes
+	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
+	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
+	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+
+	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
+	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
+	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
+
+	//
+	// Finally, push the data to be encrypted back to DataStore
+	///////////////////////////////////////
+	//           DATA STRUCTURE          //
+	///////////////////////////////////////
+	dbkey := randbyte[:16]
+
+	// HMAC Signature of data block via symmetric key
+	mac = userlib.NewHMAC(dbkey)
+	mac.Write(data)
+
+	dblock := &Data{
+		// The key at which this struct will be stored
+		KeyAddr:   address,
+		Value:     data,
+		Signature: mac.Sum(nil),
+	}
+
+	// Finally, encrypt the whole data block using Symmetric Key
+	dblockMarsh, err := json.Marshal(dblock)
+	if err != nil {
+		userlib.DebugMsg("Data block Marshalling failed")
+	}
+
+	cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
+	iv = cipherdata[:userlib.BlockSize]
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+	// NOTE: The "key" needs to be of 16 bytes
+	cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
+	cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
+
+	// Push the AES-CFB Encrypted data block structure to Data Store
+	userlib.DatastoreDelete(address)
+	userlib.DatastoreSet(address, cipherdata)
+
+	// Fuck Yeah
+	return nil
 }
 
 // This loads a file from the Datastore.
@@ -510,11 +691,6 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	return
-}
-
-// You may want to define what you actually want to pass as a
-// sharingRecord to serialized/deserialize in the data store.
-type sharingRecord struct {
 }
 
 // This creates a sharing record, which is a key pointing to something
