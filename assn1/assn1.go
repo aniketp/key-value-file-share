@@ -863,7 +863,7 @@ func (user *User) ShareFile(filename string, recipient string) (
 		return "", errors.New("Recipient not found")
 	}
 
-	// Store the signature of infoMarsh
+	// Store the signature and encoding of collected_info
 	infoMarsh, err := json.Marshal(collected_info)
 	if err != nil {
 		userlib.DebugMsg("Collected Info Marshalling failed")
@@ -893,20 +893,21 @@ func (user *User) ShareFile(filename string, recipient string) (
 	var encryptedBlock []byte
 	index = 0
 
+	fmt.Println(len(mgsidMarsh))
 	for index+190 <= len(mgsidMarsh) {
 		// RSA Asymmetric Key Encryption
 		encryptedBlock, err = userlib.RSAEncrypt(&recvPubKey,
-			inodeMarsh[index:index+190], []byte("Tag"))
+			mgsidMarsh[index:index+190], []byte("Tag"))
 		if err != nil {
 			userlib.DebugMsg("RSA Encryption of 'sharing' failed\n")
 		}
 		index += 190
-		encrypted = append(sharing, encryptedBlock)
+		sharing = append(sharing, encryptedBlock)
 	}
 
 	// In case the final chunk is not a multiple of 190
 	encryptedBlock, err = userlib.RSAEncrypt(&recvPubKey,
-		inodeMarsh[index:], []byte("Tag"))
+		mgsidMarsh[index:], []byte("Tag"))
 	if err != nil {
 		userlib.DebugMsg("RSA Encryption of 'sharing' failed\n")
 	}
@@ -971,7 +972,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 		Collected_info []byte
 		Signature      []byte
 	}{}
-	err = json.Unmarshal(msgidMarsh[:len(msgidMarsh)-1], &recv_info)
+	err = json.Unmarshal(msgidMarsh, &recv_info)
 	if err != nil {
 		userlib.DebugMsg("Received Info Unmarshalling failed, ", err)
 	}

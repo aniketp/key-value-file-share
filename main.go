@@ -37,23 +37,23 @@ func main() {
 	}
 
 	user.StoreFile("mango", []byte("apple"))
-	// err = user.AppendFile("mango", []byte("mango"))
-	// err = user.AppendFile("mango", []byte("banana"))
+	err = user.AppendFile("mango", []byte("mango"))
+	err = user.AppendFile("mango", []byte("banana"))
 	// data, err := user.LoadFile("mango")
 	// fmt.Println(string(data))
 
-	_, err := user.ShareFile("mango", "cake")
+	sharing, err := user.ShareFile("mango", "cake")
 	// fmt.Println(sharing, err)
 
-	_, err := assn1.GetUser("cake", "mangoa")
+	cakeUser, err := assn1.GetUser("cake", "mangoa")
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	// cakeUser.ReceiveFile("banana", "apple", sharing)
-	// cakeUser.AppendFile("banana", []byte("cakcesfile"))
-	// data, err := user.LoadFile("mango")
-	// fmt.Println(string(data))
+	cakeUser.ReceiveFile("banana", "apple", sharing)
+	cakeUser.AppendFile("banana", []byte("cakcesfile"))
+	data, err := user.LoadFile("mango")
+	fmt.Println(string(data))
 
 	// applae := [][]byte{[]byte("Mango"), []byte("sadas")}
 	// app := make([]byte, len(applae)-2)
