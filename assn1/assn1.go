@@ -25,71 +25,12 @@ import (
 	// so lets make life easier and use those too...
 	//
 	// You need to add with "go get github.com/google/uuid"
-	"github.com/google/uuid"
 
 	// Useful for debug messages, or string manipulation for datastore keys
-	"strings"
 
 	// Want to import errors
 	"errors"
 )
-
-// This serves two purposes: It shows you some useful primitives and
-// it suppresses warnings for items not being imported
-func someUsefulThings() {
-	// Creates a random UUID
-	f := uuid.New()
-	userlib.DebugMsg("UUID as string:%v", f.String())
-
-	// Example of writing over a byte of f
-	f[0] = 10
-	userlib.DebugMsg("UUID as string:%v", f.String())
-
-	// takes a sequence of bytes and renders as hex
-	h := hex.EncodeToString([]byte("fubar"))
-	userlib.DebugMsg("The hex: %v", h)
-
-	// Marshals data into a JSON representation
-	// Will actually work with go structures as well
-	d, _ := json.Marshal(f)
-	userlib.DebugMsg("The json data: %v", string(d))
-	var g uuid.UUID
-	json.Unmarshal(d, &g)
-	userlib.DebugMsg("Unmashaled data %v", g.String())
-
-	// This creates an error type
-	userlib.DebugMsg("Creation of error %v",
-		errors.New(strings.ToTitle("This is an error")))
-
-	// And a random RSA key.  In this case, ignoring the error
-	// return value
-	var key *userlib.PrivateKey
-	key, _ = userlib.GenerateRSAKey()
-	userlib.DebugMsg("Key is %v", key)
-}
-
-// Helper function: Takes the first 16 bytes and
-// converts it into the UUID type
-func bytesToUUID(data []byte) (ret uuid.UUID) {
-	for x := range ret {
-		ret[x] = data[x]
-	}
-	return
-}
-
-// // The structure definition for a user record
-// type User struct {
-// 	Username string
-// 	Password string
-
-// 	// Some components for the private keys
-
-// 	// You can add other fields here if you want...
-// 	// Note for JSON to marshal/unmarshal, the fields need to
-// 	// be public (start with a capital letter)
-// }
-
-/////////////////// Assignment
 
 type PrivateKey = userlib.PrivateKey
 
