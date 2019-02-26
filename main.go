@@ -55,6 +55,10 @@ func main() {
 	data, err := user.LoadFile("mango")
 	fmt.Println(string(data))
 
+	_ = user.RevokeFile("mango")
+	err = cakeUser.AppendFile("banana", []byte("maliciousFile"))
+	fmt.Println(err)
+
 	// applae := [][]byte{[]byte("Mango"), []byte("sadas")}
 	// app := make([]byte, len(applae)-2)
 
