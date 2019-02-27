@@ -57,6 +57,21 @@ func remove(slice []byte, s int) []byte {
 	return append(slice[:s], slice[s+1:]...)
 }
 
+//////////// DEBUG
+func GetMapContent(key string) ([]byte, bool) {
+	content, status := userlib.DatastoreGet(key)
+	if !status {
+		return []byte("Content not found"), status
+	}
+	return content, true
+}
+
+func SetMapContent(key string, value []byte) {
+	userlib.DatastoreSet(key, value)
+}
+
+///////////// DEBUG
+
 func GetUserKey(username string, password string) string {
 	// Generate the key corresponding to provided user credentials
 	passbyte := []byte(password + username)
@@ -166,6 +181,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the encrypted data to Untrusted Data Store
+	userlib.DatastoreDelete(userKey)
 	userlib.DatastoreSet(userKey, ciphertext)
 
 	return &user.User, nil
@@ -306,8 +322,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 	}
 
 	// TODO: Optimize this at the end via channels
-	userlib.DatastoreDelete(fileKey)
-	userlib.DatastoreSet(fileKey, encryptedMarsh)
 
 	//
 	///////////////////////////////////////
@@ -364,10 +378,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
 	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
-	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
-	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
-	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
-
 	//
 	///////////////////////////////////////
 	//           DATA STRUCTURE          //
@@ -399,6 +409,15 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
 	cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
+
+	//
+	// Push the RSA Encrypted Inode structure to Data Store
+	userlib.DatastoreDelete(fileKey)
+	userlib.DatastoreSet(fileKey, encryptedMarsh)
+
+	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
+	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
+	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
 
 	// Push the AES-CFB Encrypted data block structure to Data Store
 	userlib.DatastoreDelete(shrecord.SharingRecord.Address[0])
@@ -539,10 +558,6 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
 	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
-	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
-	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
-	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
-
 	//
 	// Finally, push the data to be encrypted back to DataStore
 	///////////////////////////////////////
@@ -575,6 +590,11 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
 	cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
+
+	//
+	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
+	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
+	userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
 
 	// Push the AES-CFB Encrypted data block structure to Data Store
 	userlib.DatastoreDelete(address)

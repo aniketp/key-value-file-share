@@ -1,8 +1,11 @@
 package assn1
 
-import "github.com/fenilfadadu/CS628-assn1/userlib"
-import "testing"
-import "reflect"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/fenilfadadu/CS628-assn1/userlib"
+)
 
 // You can actually import other stuff if you want IN YOUR TEST
 // HARNESS ONLY.  Note that this is NOT considered part of your
@@ -11,7 +14,7 @@ import "reflect"
 func TestInit(t *testing.T) {
 	t.Log("Initialization test")
 	userlib.DebugPrint = true
-//	someUsefulThings()
+	//	someUsefulThings()
 
 	userlib.DebugPrint = false
 	u, err := InitUser("alice", "fubar")
@@ -62,6 +65,7 @@ func TestShare(t *testing.T) {
 	if err != nil {
 		t.Error("Failed to download the file from alice", err)
 	}
+	t.Log("Loaded info:", string(v))
 
 	msgid, err = u.ShareFile("file1", "bob")
 	if err != nil {
@@ -79,5 +83,52 @@ func TestShare(t *testing.T) {
 	if !reflect.DeepEqual(v, v2) {
 		t.Error("Shared file is not the same", v, v2)
 	}
+
+}
+
+func TestUserCorrupt(t *testing.T) {
+	// InitUser
+	user1, err := InitUser("aniket", "password1")
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	user2, err := InitUser("ashish", "password2")
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	t.Log(user1, user2)
+
+	// GetUser (Try to ruin user data)
+	aniketKey := GetUserKey("aniket", "password1")
+	aniketCnt, _ := GetMapContent(aniketKey)
+	// fmt.Println(aniketCnt)
+	aniketCnt[len(aniketCnt)/2] = []byte("k")[0]
+	SetMapContent(aniketKey, aniketCnt)
+
+	// Here, we intentionally want the unmarshalling to fail
+	user1, err = GetUser("aniket", "password1")
+	if err != nil {
+		t.Log(err.Error())
+	} else {
+		t.Error(user1)
+	}
+}
+
+func TestStoreFile(t *testing.T) {
+	u, err := GetUser("alice", "fubar")
+	if err != nil {
+		t.Error("Failed to reload user", err)
+		return
+	}
+	t.Log("Loaded user", u)
+
+	v2, err2 := u.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+	}
+
+	t.Log("File received: ", string(v2))
 
 }
