@@ -342,6 +342,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 		// Generate a random Initialization Vector and random address for
 		// encryption of Data Block to be stored in SharingRecord structure
 		randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+		randbyte, _ = json.Marshal(randbyte)
 		address := hex.EncodeToString(randbyte[:16])
 		var addr []string
 		var keys [][]byte
@@ -432,6 +433,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
 	randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	randbyte, _ = json.Marshal(randbyte)
 	address := hex.EncodeToString(randbyte[:16])
 
 	file := &Inode_r{
@@ -502,6 +504,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// Generate a random Initialization Vector and random address for
 	// encryption of Data Block to be stored in SharingRecord structure
 	randbyte, _ = json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	randbyte, _ = json.Marshal(randbyte)
 	address = hex.EncodeToString(randbyte[:16])
 
 	// Here, we append the first block of data to the list of blocks
@@ -691,6 +694,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// Generate a random Initialization Vector and random address for
 	// encryption of Data Block to be stored in SharingRecord structure
 	randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+	randbyte, _ = json.Marshal(randbyte)
 	address := hex.EncodeToString(randbyte[:16])
 
 	shrecord.SharingRecord.Address = append(shrecord.SharingRecord.Address, address)
@@ -1330,7 +1334,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 
 	//
 	// Main Part of RevokeFile, change the encryption key of SharingRecord
-	// structure
+	// structure (and also it's address)
 
 	newKey, err := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
 	newAddr := hex.EncodeToString(newKey[:16])
@@ -1343,6 +1347,57 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// Update the key and address value in Inode struct
 	file.Inode.SymmKey = newKey[:16]
 	file.Inode.ShRecordAddr = newAddr
+
+	// IMP
+	// Need to store the updated addresses of Inode
+	// Store the signature of User_r.User in User_r.Signature
+	fileMarsh1, err := json.Marshal(file.Inode)
+	if err != nil {
+		return errors.New("File Inode marshalling failed")
+	}
+
+	file.Signature, err = userlib.RSASign(user.Privkey, fileMarsh1)
+	if err != nil {
+		return errors.New("File signing unsuccessful")
+	}
+
+	// Finally, encrypt the whole Inode_r struct with User's Public key
+	inodeMarsh1, err := json.Marshal(file)
+	if err != nil {
+		return errors.New("Inode_r marshalling failed")
+	}
+
+	// To store encrypted chunks
+	var encrypted1 [][]byte
+	var encryptedBlock1 []byte
+	index = 0
+
+	for index+190 <= len(inodeMarsh1) {
+		// RSA Asymmetric Key Encryption
+		encryptedBlock1, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
+			inodeMarsh1[index:index+190], []byte("Tag"))
+		if err != nil {
+			return
+		}
+		index += 190
+		encrypted1 = append(encrypted1, encryptedBlock1)
+	}
+
+	// In case the final chunk is not a multiple of 190
+	encryptedBlock1, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
+		inodeMarsh1[index:], []byte("Tag"))
+	if err != nil {
+		return
+	}
+	encrypted1 = append(encrypted1, encryptedBlock1)
+
+	encryptedMarsh1, err := json.Marshal(encrypted1)
+	if err != nil {
+		return
+	}
+
+	// The above was for encrypting refreshed data block
+	// COol
 
 	// Update the addresses of every data block
 	numBlocks := len(shrecord.SharingRecord.SymmKey)
@@ -1385,12 +1440,31 @@ func (user *User) RevokeFile(filename string) (err error) {
 
 		// New address for the block
 		randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+		// randbyte, _ = json.Marshal(randbyte)
 		address := hex.EncodeToString(randbyte[:16])
+
+		shrecord.SharingRecord.Address[i] = address
+		data.KeyAddr = address
+
+		//
+		// Re-encrypt the data block
+		dblockMarsh, err := json.Marshal(data)
+		if err != nil {
+			return errors.New("Data block marshalling failed")
+		}
+
+		cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
+		iv = cipherdata[:userlib.BlockSize]
+		copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+		// NOTE: The "key" needs to be of 16 bytes
+		cipher = userlib.CFBEncrypter(symmKey, iv) // Check [:16]
+		cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
 
 		// Data blocks stored at different locations
 		userlib.DatastoreDelete(dbKey)
 		userlib.DatastoreDelete(address)
-		userlib.DatastoreSet(address, ciphertext)
+		userlib.DatastoreSet(address, cipherdata)
 
 	}
 
@@ -1418,6 +1492,11 @@ func (user *User) RevokeFile(filename string) (err error) {
 	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
 	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
+
+	//
+	// Push the RSA Encrypted Inode structure to Data Store
+	userlib.DatastoreDelete(fileKey)
+	userlib.DatastoreSet(fileKey, encryptedMarsh1)
 
 	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
 	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
