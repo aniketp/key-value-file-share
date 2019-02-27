@@ -1018,6 +1018,47 @@ func (user *User) ShareFile(filename string, recipient string) (
 		return "", errors.New("SharingRecord Integrity check failed")
 	}
 
+	// Loop through all data blocks, run the checks on them
+	///////////////////////////////////////
+	//           DATA STRUCTURE          //
+	///////////////////////////////////////
+	numBlocks := len(shrecord.SharingRecord.SymmKey)
+	for i := 0; i < numBlocks; i += 1 {
+		dbKey := shrecord.SharingRecord.Address[i]
+		symmKey := shrecord.SharingRecord.SymmKey[i]
+
+		ciphertext, status := userlib.DatastoreGet(dbKey)
+		if status != true {
+			return "", errors.New("Data block not found")
+		}
+
+		iv := ciphertext[:userlib.BlockSize]
+		cipher := userlib.CFBDecrypter(symmKey, iv)
+
+		// In place AES decryption of ciphertext
+		cipher.XORKeyStream(ciphertext[userlib.BlockSize:],
+			ciphertext[userlib.BlockSize:])
+
+		var data Data
+		err = json.Unmarshal(ciphertext[userlib.BlockSize:], &data)
+		if err != nil {
+			return "", errors.New("Data block Unmarshalling failed")
+		}
+
+		// Check the data integrity
+		mac := userlib.NewHMAC(symmKey)
+		mac.Write(data.Value)
+		hmacSum := mac.Sum(nil)
+		if !userlib.Equal(data.Signature, hmacSum) {
+			return "", errors.New("Data Integrity check failed")
+		}
+
+		// Key-value swap check
+		if dbKey != data.KeyAddr {
+			return "", errors.New("Key Value swap detected")
+		}
+	}
+
 	//
 	// Find collected_info and return after appropriate verification
 	collected_info := struct {
@@ -1236,7 +1277,12 @@ func (user *User) ReceiveFile(filename string, sender string,
 		return errors.New("Marshalling of encrypted blocks failed")
 	}
 
-	userlib.DatastoreDelete(fileKey)
+	// userlib.DatastoreDelete(fileKey)
+	_, status = userlib.DatastoreGet(fileKey)
+	if status {
+		return errors.New("The specified file already exists")
+	}
+
 	userlib.DatastoreSet(fileKey, encryptedMarsh)
 
 	return nil
