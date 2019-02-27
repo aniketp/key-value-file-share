@@ -132,3 +132,37 @@ func TestStoreFile(t *testing.T) {
 	t.Log("File received: ", string(v2))
 
 }
+
+func TestShareMutate(t *testing.T) {
+	u, err := GetUser("alice", "fubar")
+	if err != nil {
+		t.Error("Failed to reload alice", err)
+	}
+	u2, err2 := GetUser("bob", "foobar")
+	if err2 != nil {
+		t.Error("Failed to reload bob", err2)
+	}
+
+	// Bob's version of sharedfile
+	v2, err := u2.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file after sharing", err)
+	}
+
+	t.Log("The content of file is : ", string(v2))
+
+	// Bob rewrites the shared-file
+	newCont := []byte("This is NEW content")
+	u2.StoreFile("file2", newCont)
+	// Alice loads the same file (expect the test to currently fail)
+	v1, err := u.LoadFile("file1")
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	if string(newCont) != string(v1) {
+		t.Error("The file contents don't match")
+	}
+
+	t.Log("The contents match: ", string(newCont))
+}

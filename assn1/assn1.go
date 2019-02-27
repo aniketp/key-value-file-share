@@ -254,6 +254,174 @@ func (user *User) StoreFile(filename string, data []byte) {
 	///////////////////////////////////////
 	fileKey := user.GetInodeKey(filename)
 
+	// Check if the Inode for filename already exists
+	rsaEncrypted, status := userlib.DatastoreGet(fileKey)
+	if status {
+		//
+		// Since the Inode exists, we just need to overwrite the addess and
+		// symmetric keys at SharingRecord structure, apart from actually
+		// writing the data to DataStore
+		var encrypted [][]byte
+		err := json.Unmarshal(rsaEncrypted, &encrypted)
+		if err != nil {
+			return
+		}
+
+		// Retreive the Marshalled Inode_r struct from the encrypted chunks
+		index := 0
+		inodeMarsh := make([]byte, len(encrypted))
+		for index < len(encrypted) {
+			// RSA Asymmetric Key Decryption
+			decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
+				encrypted[index], []byte("Tag"))
+			if err != nil {
+				return
+			}
+
+			inodeMarsh = append(inodeMarsh, decryptedBlock...)
+			index += 1
+		}
+
+		// Remove leading \x00 characters from inodeMarsh
+		for inodeMarsh[0] == []byte("\x00")[0] {
+			inodeMarsh = remove(inodeMarsh, 0)
+		}
+
+		var file Inode_r
+		err = json.Unmarshal(inodeMarsh, &file)
+		if err != nil {
+			return
+		}
+
+		// Verify Inode structure's integrity
+		fileMarsh, err := json.Marshal(file.Inode)
+		if err != nil {
+			return
+		}
+
+		err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
+		if err != nil {
+			return
+		}
+
+		//
+		///////////////////////////////////////
+		//      SHARINGRECORD STRUCTURE      //
+		///////////////////////////////////////
+		// Retrieve encrypted SharingRecord structure from DataStore
+		shrCipher, status := userlib.DatastoreGet(file.Inode.ShRecordAddr)
+		if !status {
+			return
+		}
+
+		iv := shrCipher[:userlib.BlockSize]
+		cipher := userlib.CFBDecrypter(file.Inode.SymmKey, iv)
+
+		// In place AES decryption of ciphertext
+		cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
+		// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+
+		var shrecord SharingRecord_r
+		err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
+		if err != nil {
+			return
+		}
+
+		// Verify the integrity of SharingRecord structure
+		shrMarsh, err := json.Marshal(shrecord.SharingRecord)
+		if err != nil {
+			return
+		}
+		mac := userlib.NewHMAC(file.Inode.SymmKey)
+		mac.Write(shrMarsh)
+		if !userlib.Equal(shrecord.Signature, mac.Sum(nil)) {
+			return
+		}
+
+		// Appending a new block
+		// Generate a random Initialization Vector and random address for
+		// encryption of Data Block to be stored in SharingRecord structure
+		randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+		address := hex.EncodeToString(randbyte[:16])
+		var addr []string
+		var keys [][]byte
+
+		shrecord.SharingRecord.Address = append(addr, address)
+		shrecord.SharingRecord.SymmKey = append(keys, randbyte[:16])
+
+		//
+		// Now, Store the modified, encrypted and re-signed SharingRecord structure
+		// back to the DataStore
+		//
+
+		// HMAC Signature via symmetric keys
+		// Store the signature of SharingRecord_r.SharingRecord in Signature
+		shrMarsh, err = json.Marshal(shrecord.SharingRecord)
+		if err != nil {
+			return
+		}
+		mac = userlib.NewHMAC(file.Inode.SymmKey)
+		mac.Write(shrMarsh)
+		shrecord.Signature = mac.Sum(nil)
+
+		// Finally, encrypt the whole SharingRecord_r structure
+		shrecord_rMarsh, err := json.Marshal(shrecord)
+		if err != nil {
+			return
+		}
+
+		ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
+		iv = ciphertext[:userlib.BlockSize]
+		copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+		// NOTE: The "key" needs to be of 16 bytes
+		cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
+		cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
+		// return errors.New("Message  ", hex.EncodeToString(ciphertext))
+
+		//
+		// Finally, push the data to be encrypted back to DataStore
+		///////////////////////////////////////
+		//           DATA STRUCTURE          //
+		///////////////////////////////////////
+		dbkey := randbyte[:16]
+
+		// HMAC Signature of data block via symmetric key
+		mac = userlib.NewHMAC(dbkey)
+		mac.Write(data)
+		hmacSum := mac.Sum(nil)
+
+		dblock := &Data{
+			// The key at which this struct will be stored
+			KeyAddr:   address,
+			Value:     data,
+			Signature: hmacSum,
+		}
+
+		// Finally, encrypt the whole data block using Symmetric Key
+		dblockMarsh, err := json.Marshal(dblock)
+		if err != nil {
+			return
+		}
+
+		cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
+		iv = cipherdata[:userlib.BlockSize]
+		copy(iv, userlib.RandomBytes(userlib.BlockSize))
+
+		// NOTE: The "key" needs to be of 16 bytes
+		cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
+		cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
+
+		//
+		// Push the AES-CFB Encrypted SharingRecord structure to Data Store
+		userlib.DatastoreDelete(file.Inode.ShRecordAddr)
+		userlib.DatastoreSet(file.Inode.ShRecordAddr, ciphertext)
+
+		// Push the AES-CFB Encrypted data block structure to Data Store
+		userlib.DatastoreDelete(address)
+		userlib.DatastoreSet(address, cipherdata)
+	}
+
 	//
 	// Initialize the Inode structure without any signature (at the moment)
 	//
@@ -733,6 +901,11 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 			return nil, errors.New("Data Integrity check failed")
 		}
 
+		// Key-value swap check
+		if dbKey != data.KeyAddr {
+			return nil, errors.New("Key Value swap detected")
+		}
+
 		finalData = append(finalData, data.Value...)
 	}
 
@@ -1170,6 +1343,56 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// Update the key and address value in Inode struct
 	file.Inode.SymmKey = newKey[:16]
 	file.Inode.ShRecordAddr = newAddr
+
+	// Update the addresses of every data block
+	numBlocks := len(shrecord.SharingRecord.SymmKey)
+	for i := 0; i < numBlocks; i += 1 {
+		// Bring in the blocks, verify their integrity, and place them
+		// somewhere else in the DataStore
+		dbKey := shrecord.SharingRecord.Address[i] // TODO: Change the loc
+		symmKey := shrecord.SharingRecord.SymmKey[i]
+
+		ciphertext, status := userlib.DatastoreGet(dbKey)
+		if status != true {
+			return errors.New("Data block not found")
+		}
+
+		iv := ciphertext[:userlib.BlockSize]
+		cipher := userlib.CFBDecrypter(symmKey, iv)
+
+		// In place AES decryption of ciphertext
+		cipher.XORKeyStream(ciphertext[userlib.BlockSize:],
+			ciphertext[userlib.BlockSize:])
+
+		var data Data
+		err = json.Unmarshal(ciphertext[userlib.BlockSize:], &data)
+		if err != nil {
+			return errors.New("Data block Unmarshalling failed")
+		}
+
+		// Check the data integrity
+		mac := userlib.NewHMAC(symmKey)
+		mac.Write(data.Value)
+		hmacSum := mac.Sum(nil)
+		if !userlib.Equal(data.Signature, hmacSum) {
+			return errors.New("Data Integrity check failed")
+		}
+
+		// Key-value swap check
+		if dbKey != data.KeyAddr {
+			return errors.New("Key Value swap detected")
+		}
+
+		// New address for the block
+		randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
+		address := hex.EncodeToString(randbyte[:16])
+
+		// Data blocks stored at different locations
+		userlib.DatastoreDelete(dbKey)
+		userlib.DatastoreDelete(address)
+		userlib.DatastoreSet(address, ciphertext)
+
+	}
 
 	// HMAC Signature via symmetric keys
 	// Store the signature of SharingRecord_r.SharingRecord in Signature
