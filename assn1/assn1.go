@@ -1,49 +1,25 @@
-// Copyright (c) 2019 Aniket Pandey <aniketp@iitk.ac.in>
-// Copyright (c) 2019 Ashish Kumar <akashish@iitk.ac.in>
-
 package assn1
 
-// You MUST NOT change what you import.  If you add ANY additional
-// imports it will break the autograder, and we will be Very Upset.
-
 import (
-
-	// You neet to add with
-	// go get github.com/fenilfadadu/CS628-assn1/userlib
-
-	"github.com/fenilfadadu/CS628-assn1/userlib"
-
-	// Life is much easier with json:  You are
-	// going to want to use this so you can easily
-	// turn complex structures into strings etc...
-	"encoding/json"
-
-	// Likewise useful for debugging etc
 	"encoding/hex"
-
-	// UUIDs are generated right based on the crypto RNG
-	// so lets make life easier and use those too...
-	//
-	// You need to add with "go get github.com/google/uuid"
-
-	// Useful for debug messages, or string manipulation for datastore keys
-
-	// Want to import errors
+	"encoding/json"
 	"errors"
+
+	"github.com/fenilfadadu/cs628-assn1/userlib"
 )
 
-type PrivateKey = userlib.PrivateKey
+type privatekey = userlib.privatekey
 
-type User_r struct {
-	KeyAddr   string
-	Signature []byte
-	User
+type user_r struct {
+	keyaddr   string
+	signature []byte
+	user
 }
 
-type User struct {
-	Username string
-	Password string
-	Privkey  *PrivateKey
+type user struct {
+	username string
+	password string
+	privkey  *privatekey
 }
 
 type Inode_r struct {
@@ -95,7 +71,6 @@ func GetUserKey(username string, password string) string {
 
 	// This is the key where encrypted User struct will be stored
 	userKey := hex.EncodeToString(marsh)
-	userlib.DebugMsg(userKey)
 
 	return userKey
 }
@@ -113,7 +88,7 @@ func (user *User) GetInodeKey(filename string) string {
 	}
 	// This is the key where encrypted Inode struct for "filename" is stored
 	fileKey := hex.EncodeToString(marsh)
-	// userlib.DebugMsg("fileKey " + fileKey)
+	// return errors.New("fileKey " + fileKey)
 
 	return fileKey
 }
@@ -140,20 +115,20 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userKey := GetUserKey(username, password)
 	userSymKey, err := hex.DecodeString(GetUserKey(password, username))
 	if err != nil {
-		userlib.DebugMsg(err.Error())
+		return nil, errors.New(err.Error())
 	}
 
 	// Generate RSA Public-Private Key Pair for the User
 	privKey, err := userlib.GenerateRSAKey()
 	if err != nil {
-		userlib.DebugMsg("RSA Key-Pair generation failed")
+		return nil, errors.New("RSA Key-Pair generation failed")
 	}
 
 	// Push the RSA Public Key to secure Key-Store
 	userlib.KeystoreSet(username, privKey.PublicKey)
 
 	// This is the key to symmetrically encrypt User struct
-	userlib.DebugMsg(hex.EncodeToString(userSymKey))
+	// return errors.New(hex.EncodeToString(userSymKey))
 
 	// Initialize the User structure without any signature
 	user := &User_r{
@@ -168,7 +143,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Store the signature of User_r.User in User_r.Signature
 	userMarsh, err := json.Marshal(user.User)
 	if err != nil {
-		userlib.DebugMsg("User_r.User Marshal failed")
+		return nil, errors.New("User_r.User Marshal failed")
 	}
 	mac := userlib.NewHMAC(userSymKey)
 	mac.Write(userMarsh)
@@ -177,18 +152,18 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Finally, encrypt the whole thing
 	user_rMarsh, err := json.Marshal(user)
 	if err != nil {
-		userlib.DebugMsg("User_r Marshal failed")
+		return nil, errors.New("User_r Marshal failed")
 	}
 
 	ciphertext := make([]byte, userlib.BlockSize+len(user_rMarsh))
 	iv := ciphertext[:userlib.BlockSize]
 	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
-	// userlib.DebugMsg("Random IV", hex.EncodeToString(iv))
+	// return errors.New("Random IV", hex.EncodeToString(iv))
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher := userlib.CFBEncrypter(userSymKey[:16], iv)
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(user_rMarsh))
-	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the encrypted data to Untrusted Data Store
 	userlib.DatastoreSet(userKey, ciphertext)
@@ -204,7 +179,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	userKey := GetUserKey(username, password)
 	userSymKey, err := hex.DecodeString(GetUserKey(password, username))
 	if err != nil {
-		userlib.DebugMsg(err.Error())
+		return nil, errors.New(err.Error())
 	}
 
 	// Now, retrieve and decrypt the User_r struct and check if the
@@ -219,18 +194,18 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], ciphertext[userlib.BlockSize:])
-	// userlib.DebugMsg("Decrypted message", string(ciphertext[userlib.BlockSize:]))
+	// return errors.New("Decrypted message", string(ciphertext[userlib.BlockSize:]))
 
 	var user User_r
 	err = json.Unmarshal(ciphertext[userlib.BlockSize:], &user)
 	if err != nil {
-		userlib.DebugMsg("User_r Unmarshalling failed")
+		return nil, errors.New("User_r Unmarshalling failed")
 	}
 
 	// Verify the User_r struct's integrity
 	userMarsh, err := json.Marshal(user.User)
 	if err != nil {
-		userlib.DebugMsg("User_r.User Marshal failed")
+		return nil, errors.New("User_r.User Marshal failed")
 	}
 
 	mac := userlib.NewHMAC(userSymKey)
@@ -287,18 +262,18 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// Store the signature of User_r.User in User_r.Signature
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return
 	}
 
 	file.Signature, err = userlib.RSASign(user.Privkey, fileMarsh)
 	if err != nil {
-		userlib.DebugMsg("RSA Signing of Inode_r.Inode failed")
+		return
 	}
 
 	// Finally, encrypt the whole Inode_r struct with User's Public key
 	inodeMarsh, err := json.Marshal(file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Marshalling failed")
+		return
 	}
 
 	// To store encrypted chunks
@@ -311,7 +286,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 		encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
 			inodeMarsh[index:index+190], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return
 		}
 		index += 190
 		encrypted = append(encrypted, encryptedBlock)
@@ -321,13 +296,13 @@ func (user *User) StoreFile(filename string, data []byte) {
 	encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
 		inodeMarsh[index:], []byte("Tag"))
 	if err != nil {
-		userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+		return
 	}
 	encrypted = append(encrypted, encryptedBlock)
 
 	encryptedMarsh, err := json.Marshal(encrypted)
 	if err != nil {
-		userlib.DebugMsg("Marshalling of encrypted blocks failed")
+		return
 	}
 
 	// TODO: Optimize this at the end via channels
@@ -368,7 +343,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// Store the signature of SharingRecord_r.SharingRecord in Signature
 	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return
 	}
 	mac := userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -377,7 +352,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// Finally, encrypt the whole SharingRecord_r structure
 	shrecord_rMarsh, err := json.Marshal(shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Marshalling failed")
+		return
 	}
 
 	ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
@@ -387,7 +362,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher := userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
 	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
@@ -414,7 +389,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// Finally, encrypt the whole data block using Symmetric Key
 	dblockMarsh, err := json.Marshal(dblock)
 	if err != nil {
-		userlib.DebugMsg("Data block Marshalling failed")
+		return
 	}
 
 	cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
@@ -451,7 +426,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	var encrypted [][]byte
 	err = json.Unmarshal(rsaEncrypted, &encrypted)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed")
+		return errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Retreive the Marshalled Inode_r struct from the encrypted chunks
@@ -462,7 +437,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
 			encrypted[index], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return errors.New("RSA Encryption of Inode_r failed\n")
 		}
 
 		inodeMarsh = append(inodeMarsh, decryptedBlock...)
@@ -477,13 +452,13 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	var file Inode_r
 	err = json.Unmarshal(inodeMarsh, &file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed, ", err)
+		return errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Verify Inode structure's integrity
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return errors.New("Inode_r.Inode Marshalling failed")
 	}
 
 	err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
@@ -506,18 +481,18 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// userlib.DebugMsg("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Unmarshalling failed, ", err)
+		return errors.New("SharingRecord_r Unmarshalling failed")
 	}
 
 	// Verify the integrity of SharingRecord structure
 	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac := userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -543,7 +518,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// Store the signature of SharingRecord_r.SharingRecord in Signature
 	shrMarsh, err = json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac = userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -552,7 +527,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// Finally, encrypt the whole SharingRecord_r structure
 	shrecord_rMarsh, err := json.Marshal(shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Marshalling failed")
+		return errors.New("SharingRecord_r Marshalling failed")
 	}
 
 	ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
@@ -562,7 +537,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
 	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
@@ -590,7 +565,7 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// Finally, encrypt the whole data block using Symmetric Key
 	dblockMarsh, err := json.Marshal(dblock)
 	if err != nil {
-		userlib.DebugMsg("Data block Marshalling failed")
+		return errors.New("Data block Marshalling failed")
 	}
 
 	cipherdata := make([]byte, userlib.BlockSize+len(dblockMarsh))
@@ -626,7 +601,7 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 	var encrypted [][]byte
 	err = json.Unmarshal(rsaEncrypted, &encrypted)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed")
+		return nil, errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Retreive the Marshalled Inode_r struct from the encrypted chunks
@@ -637,7 +612,7 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
 			encrypted[index], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return nil, errors.New("RSA Encryption of Inode_r failed\n")
 		}
 
 		inodeMarsh = append(inodeMarsh, decryptedBlock...)
@@ -652,13 +627,13 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 	var file Inode_r
 	err = json.Unmarshal(inodeMarsh, &file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed, ", err)
+		return nil, errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Verify Inode structure's integrity
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return nil, errors.New("Inode_r.Inode Marshalling failed")
 	}
 
 	err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
@@ -681,18 +656,18 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// userlib.DebugMsg("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Unmarshalling failed, ", err)
+		return nil, errors.New("SharingRecord_r Unmarshalling failed")
 	}
 
 	// Verify the integrity of SharingRecord structure
 	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return nil, errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac := userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -727,7 +702,7 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 		var data Data
 		err = json.Unmarshal(ciphertext[userlib.BlockSize:], &data)
 		if err != nil {
-			userlib.DebugMsg("Data block Unmarshalling failed")
+			return nil, errors.New("Data block Unmarshalling failed")
 		}
 
 		// Check the data integrity
@@ -772,7 +747,7 @@ func (user *User) ShareFile(filename string, recipient string) (
 	var encrypted [][]byte
 	err = json.Unmarshal(rsaEncrypted, &encrypted)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed")
+		return "", errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Retreive the Marshalled Inode_r struct from the encrypted chunks
@@ -783,7 +758,7 @@ func (user *User) ShareFile(filename string, recipient string) (
 		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
 			encrypted[index], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return "", errors.New("RSA Encryption of Inode_r failed\n")
 		}
 
 		inodeMarsh = append(inodeMarsh, decryptedBlock...)
@@ -798,13 +773,13 @@ func (user *User) ShareFile(filename string, recipient string) (
 	var file Inode_r
 	err = json.Unmarshal(inodeMarsh, &file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed, ", err)
+		return "", errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Verify Inode structure's integrity
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return "", errors.New("Inode_r.Inode Marshalling failed")
 	}
 
 	err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
@@ -827,18 +802,18 @@ func (user *User) ShareFile(filename string, recipient string) (
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// userlib.DebugMsg("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Unmarshalling failed, ", err)
+		return "", errors.New("SharingRecord_r Unmarshalling failed")
 	}
 
 	// Verify the integrity of SharingRecord structure
 	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return "", errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac := userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -864,12 +839,12 @@ func (user *User) ShareFile(filename string, recipient string) (
 	// Store the signature and encoding of collected_info
 	infoMarsh, err := json.Marshal(collected_info)
 	if err != nil {
-		userlib.DebugMsg("Collected Info Marshalling failed")
+		return "", errors.New("Collected Info Marshalling failed")
 	}
 
 	infoSign, err := userlib.RSASign(user.Privkey, infoMarsh)
 	if err != nil {
-		userlib.DebugMsg("RSA Signing of Collected_info failed")
+		return "", errors.New("RSA Signing of Collected_info failed")
 	}
 
 	// Finally, encrypt the whole Packet struct with reciever's Public key
@@ -883,7 +858,7 @@ func (user *User) ShareFile(filename string, recipient string) (
 
 	mgsidMarsh, err := json.Marshal(send_info)
 	if err != nil {
-		userlib.DebugMsg("msgid Marshalling failed")
+		return "", errors.New("msgid Marshalling failed")
 	}
 
 	// To store encrypted chunks
@@ -896,7 +871,7 @@ func (user *User) ShareFile(filename string, recipient string) (
 		encryptedBlock, err = userlib.RSAEncrypt(&recvPubKey,
 			mgsidMarsh[index:index+190], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of 'sharing' failed\n")
+			return "", errors.New("RSA Encryption of 'sharing' failed\n")
 		}
 		index += 190
 		sharing = append(sharing, encryptedBlock)
@@ -906,13 +881,13 @@ func (user *User) ShareFile(filename string, recipient string) (
 	encryptedBlock, err = userlib.RSAEncrypt(&recvPubKey,
 		mgsidMarsh[index:], []byte("Tag"))
 	if err != nil {
-		userlib.DebugMsg("RSA Encryption of 'sharing' failed\n")
+		return "", errors.New("RSA Encryption of 'sharing' failed\n")
 	}
 	sharing = append(sharing, encryptedBlock)
 
 	sharingMarsh, err := json.Marshal(sharing)
 	if err != nil {
-		userlib.DebugMsg("Marshalling of sharing structure failed")
+		return "", errors.New("Marshalling of sharing structure failed")
 	}
 
 	return hex.EncodeToString(sharingMarsh), nil
@@ -934,7 +909,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 	var sharing [][]byte
 	err = json.Unmarshal(sharingMarsh, &sharing)
 	if err != nil {
-		userlib.DebugMsg("'sharing' Unmarshalling failed")
+		return errors.New("'sharing' Unmarshalling failed")
 	}
 
 	// Retrieve sender's public key
@@ -951,7 +926,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
 			sharing[index], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of 'sharing' failed\n")
+			return errors.New("RSA Encryption of 'sharing' failed\n")
 		}
 
 		msgidMarsh = append(msgidMarsh, decryptedBlock...)
@@ -969,7 +944,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 	}{}
 	err = json.Unmarshal(msgidMarsh, &recv_info)
 	if err != nil {
-		userlib.DebugMsg("Received Info Unmarshalling failed, ", err)
+		return errors.New("Received Info Unmarshalling failed")
 	}
 
 	// Verify the Integrity of "sharing" message
@@ -985,7 +960,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 	}{}
 	err = json.Unmarshal(recv_info.Collected_info, &collected_info)
 	if err != nil {
-		userlib.DebugMsg("Recieved Info Unmarshalling failed, ", err)
+		return errors.New("Recieved Info Unmarshalling failed")
 	}
 
 	///////////////////////////////////////
@@ -1021,18 +996,18 @@ func (user *User) ReceiveFile(filename string, sender string,
 	// Store the signature of User_r.User in User_r.Signature
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return errors.New("Inode_r.Inode Marshalling failed")
 	}
 
 	file.Signature, err = userlib.RSASign(user.Privkey, fileMarsh)
 	if err != nil {
-		userlib.DebugMsg("RSA Signing of Inode_r.Inode failed")
+		return errors.New("RSA Signing of Inode_r.Inode failed")
 	}
 
 	// Finally, encrypt the whole Inode_r struct with User's Public key
 	inodeMarsh, err := json.Marshal(file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Marshalling failed")
+		return errors.New("Inode_r Marshalling failed")
 	}
 
 	// To store encrypted chunks
@@ -1045,7 +1020,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 		encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
 			inodeMarsh[index:index+190], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return errors.New("RSA Encryption of Inode_r failed\n")
 		}
 		index += 190
 		encrypted = append(encrypted, encryptedBlock)
@@ -1055,13 +1030,13 @@ func (user *User) ReceiveFile(filename string, sender string,
 	encryptedBlock, err = userlib.RSAEncrypt(&user.Privkey.PublicKey,
 		inodeMarsh[index:], []byte("Tag"))
 	if err != nil {
-		userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+		return errors.New("RSA Encryption of Inode_r failed\n")
 	}
 	encrypted = append(encrypted, encryptedBlock)
 
 	encryptedMarsh, err := json.Marshal(encrypted)
 	if err != nil {
-		userlib.DebugMsg("Marshalling of encrypted blocks failed")
+		return errors.New("Marshalling of encrypted blocks failed")
 	}
 
 	userlib.DatastoreDelete(fileKey)
@@ -1086,7 +1061,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 	var encrypted [][]byte
 	err = json.Unmarshal(rsaEncrypted, &encrypted)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed")
+		return errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Retreive the Marshalled Inode_r struct from the encrypted chunks
@@ -1097,7 +1072,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 		decryptedBlock, err := userlib.RSADecrypt(user.Privkey,
 			encrypted[index], []byte("Tag"))
 		if err != nil {
-			userlib.DebugMsg("RSA Encryption of Inode_r failed\n")
+			return errors.New("RSA Encryption of Inode_r failed\n")
 		}
 
 		inodeMarsh = append(inodeMarsh, decryptedBlock...)
@@ -1112,13 +1087,13 @@ func (user *User) RevokeFile(filename string) (err error) {
 	var file Inode_r
 	err = json.Unmarshal(inodeMarsh, &file)
 	if err != nil {
-		userlib.DebugMsg("Inode_r Unmarshalling failed, ", err)
+		return errors.New("Inode_r Unmarshalling failed")
 	}
 
 	// Verify Inode structure's integrity
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
-		userlib.DebugMsg("Inode_r.Inode Marshalling failed")
+		return errors.New("Inode_r.Inode Marshalling failed")
 	}
 
 	err = userlib.RSAVerify(&user.Privkey.PublicKey, fileMarsh, file.Signature)
@@ -1141,18 +1116,18 @@ func (user *User) RevokeFile(filename string) (err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// userlib.DebugMsg("Decrypted message", string(shrCipher[userlib.BlockSize:]))
+	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Unmarshalling failed, ", err)
+		return errors.New("SharingRecord_r Unmarshalling failed")
 	}
 
 	// Verify the integrity of SharingRecord structure
 	shrMarsh, err := json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac := userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -1167,7 +1142,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 	newKey, err := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
 	newAddr := hex.EncodeToString(newKey[:16])
 	if err != nil {
-		userlib.DebugMsg("New-key marshalling failed")
+		return errors.New("New-key marshalling failed")
 	}
 
 	prevAddr := file.Inode.ShRecordAddr
@@ -1180,7 +1155,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// Store the signature of SharingRecord_r.SharingRecord in Signature
 	shrMarsh, err = json.Marshal(shrecord.SharingRecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r.SharingRecord Marshalling failed")
+		return errors.New("SharingRecord_r.SharingRecord Marshalling failed")
 	}
 	mac = userlib.NewHMAC(file.Inode.SymmKey)
 	mac.Write(shrMarsh)
@@ -1189,7 +1164,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// Finally, encrypt the whole SharingRecord_r structure
 	shrecord_rMarsh, err := json.Marshal(shrecord)
 	if err != nil {
-		userlib.DebugMsg("SharingRecord_r Marshalling failed")
+		return errors.New("SharingRecord_r Marshalling failed")
 	}
 
 	ciphertext := make([]byte, userlib.BlockSize+len(shrecord_rMarsh))
@@ -1199,7 +1174,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// userlib.DebugMsg("Message  ", hex.EncodeToString(ciphertext))
+	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the AES-CFB Encrypted SharingRecord structure to Data Store
 	userlib.DatastoreDelete(file.Inode.ShRecordAddr)
