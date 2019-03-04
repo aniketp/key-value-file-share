@@ -103,7 +103,6 @@ func (user *User) GetInodeKey(filename string) string {
 	}
 	// This is the key where encrypted Inode struct for "filename" is stored
 	fileKey := hex.EncodeToString(marsh)
-	// return errors.New("fileKey " + fileKey)
 
 	return fileKey
 }
@@ -142,9 +141,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Push the RSA Public Key to secure Key-Store
 	userlib.KeystoreSet(username, privKey.PublicKey)
 
-	// This is the key to symmetrically encrypt User struct
-	// return errors.New(hex.EncodeToString(userSymKey))
-
 	// Initialize the User structure without any signature
 	user := &User_r{
 		KeyAddr: userKey, // The key at which this struct will be stored
@@ -158,7 +154,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Store the signature of User_r.User in User_r.Signature
 	userMarsh, err := json.Marshal(user.User)
 	if err != nil {
-		return nil, errors.New("User_r.User Marshal failed")
+		return nil, errors.New("User_r.User Marshalling failed")
 	}
 	mac := userlib.NewHMAC(userSymKey)
 	mac.Write(userMarsh)
@@ -167,18 +163,17 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Finally, encrypt the whole thing
 	user_rMarsh, err := json.Marshal(user)
 	if err != nil {
-		return nil, errors.New("User_r Marshal failed")
+		return nil, errors.New("User_r Marshalling failed")
 	}
 
 	ciphertext := make([]byte, userlib.BlockSize+len(user_rMarsh))
 	iv := ciphertext[:userlib.BlockSize]
 	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
-	// return errors.New("Random IV", hex.EncodeToString(iv))
+	// userlib.DebugMsg("Random IV", hex.EncodeToString(iv))
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher := userlib.CFBEncrypter(userSymKey[:16], iv)
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(user_rMarsh))
-	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	// Push the encrypted data to Untrusted Data Store
 	userlib.DatastoreDelete(userKey)
@@ -210,7 +205,6 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], ciphertext[userlib.BlockSize:])
-	// return errors.New("Decrypted message", string(ciphertext[userlib.BlockSize:]))
 
 	var user User_r
 	err = json.Unmarshal(ciphertext[userlib.BlockSize:], &user)
@@ -221,7 +215,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	// Verify the User_r struct's integrity
 	userMarsh, err := json.Marshal(user.User)
 	if err != nil {
-		return nil, errors.New("User_r.User Marshal failed")
+		return nil, errors.New("User_r.User Marshalling failed")
 	}
 
 	mac := userlib.NewHMAC(userSymKey)
@@ -319,7 +313,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 
 		// In place AES decryption of ciphertext
 		cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-		// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 		var shrecord SharingRecord_r
 		err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
@@ -342,7 +335,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 		// Generate a random Initialization Vector and random address for
 		// encryption of Data Block to be stored in SharingRecord structure
 		randbyte, _ := json.Marshal(userlib.RandomBytes(userlib.BlockSize))
-		randbyte, _ = json.Marshal(randbyte)
+		randbyte, _ = json.Marshal(randbyte) // Double shuffling to reduce collision
 		address := hex.EncodeToString(randbyte[:16])
 		var addr []string
 		var keys [][]byte
@@ -378,7 +371,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 		// NOTE: The "key" needs to be of 16 bytes
 		cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 		cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-		// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 		//
 		// Finally, push the data to be encrypted back to DataStore
@@ -410,7 +402,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 		copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
 		// NOTE: The "key" needs to be of 16 bytes
-		cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
+		cipher = userlib.CFBEncrypter(dbkey, iv)
 		cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
 
 		//
@@ -445,7 +437,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 		},
 	}
 
-	// Store the signature of User_r.User in User_r.Signature
+	// Store the signature of Inode_r.Inode in Inode_r.Signature
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
 		return
@@ -491,8 +483,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 		return
 	}
 
-	// TODO: Optimize this at the end via channels
-
 	//
 	///////////////////////////////////////
 	//      SHARINGRECORD STRUCTURE      //
@@ -511,8 +501,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// The address and the encryption key for the block
 	addr = append(addr, address)
 	keys = append(keys, randbyte[:16])
-
-	// fmt.Println(len(address), len(randbyte[:16]))
 
 	shrecord := &SharingRecord_r{
 		KeyAddr: file.Inode.ShRecordAddr, // The key at which this struct will be stored
@@ -547,7 +535,6 @@ func (user *User) StoreFile(filename string, data []byte) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher := userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	//
 	///////////////////////////////////////
@@ -578,7 +565,7 @@ func (user *User) StoreFile(filename string, data []byte) {
 	copy(iv, userlib.RandomBytes(userlib.BlockSize))
 
 	// NOTE: The "key" needs to be of 16 bytes
-	cipher = userlib.CFBEncrypter(dbkey, iv) // Check [:16]
+	cipher = userlib.CFBEncrypter(dbkey, iv)
 	cipher.XORKeyStream(cipherdata[userlib.BlockSize:], []byte(dblockMarsh))
 
 	//
@@ -671,7 +658,6 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
@@ -728,7 +714,6 @@ func (user *User) AppendFile(filename string, data []byte) (err error) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	//
 	// Finally, push the data to be encrypted back to DataStore
@@ -848,7 +833,6 @@ func (user *User) LoadFile(filename string) (data []byte, err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
@@ -999,7 +983,6 @@ func (user *User) ShareFile(filename string, recipient string) (
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
@@ -1231,7 +1214,7 @@ func (user *User) ReceiveFile(filename string, sender string,
 		},
 	}
 
-	// Store the signature of User_r.User in User_r.Signature
+	// Store the signature of Inode_r.Inode in Inode_r.Signature
 	fileMarsh, err := json.Marshal(file.Inode)
 	if err != nil {
 		return errors.New("Inode_r.Inode Marshalling failed")
@@ -1359,7 +1342,6 @@ func (user *User) RevokeFile(filename string) (err error) {
 
 	// In place AES decryption of ciphertext
 	cipher.XORKeyStream(shrCipher[userlib.BlockSize:], shrCipher[userlib.BlockSize:])
-	// return errors.New("Decrypted message", string(shrCipher[userlib.BlockSize:]))
 
 	var shrecord SharingRecord_r
 	err = json.Unmarshal(shrCipher[userlib.BlockSize:], &shrecord)
@@ -1396,7 +1378,7 @@ func (user *User) RevokeFile(filename string) (err error) {
 
 	// IMP
 	// Need to store the updated addresses of Inode
-	// Store the signature of User_r.User in User_r.Signature
+	// Store the signature of Inode_r.Inode in Inode_r.Signature
 	fileMarsh1, err := json.Marshal(file.Inode)
 	if err != nil {
 		return errors.New("File Inode marshalling failed")
@@ -1441,9 +1423,6 @@ func (user *User) RevokeFile(filename string) (err error) {
 	if err != nil {
 		return
 	}
-
-	// The above was for encrypting refreshed data block
-	// COol
 
 	// Update the addresses of every data block
 	numBlocks := len(shrecord.SharingRecord.SymmKey)
@@ -1537,7 +1516,6 @@ func (user *User) RevokeFile(filename string) (err error) {
 	// NOTE: The "key" needs to be of 16 bytes
 	cipher = userlib.CFBEncrypter(file.Inode.SymmKey, iv) // Check [:16]
 	cipher.XORKeyStream(ciphertext[userlib.BlockSize:], []byte(shrecord_rMarsh))
-	// return errors.New("Message  ", hex.EncodeToString(ciphertext))
 
 	//
 	// Push the RSA Encrypted Inode structure to Data Store
