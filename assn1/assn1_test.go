@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/fenilfadadu/CS628-assn1/userlib"
+	"github.com/fenilfadadu/cs628-assn1/userlib"
 )
 
 // You can actually import other stuff if you want IN YOUR TEST

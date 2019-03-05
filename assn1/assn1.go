@@ -8,18 +8,20 @@ import (
 	"github.com/fenilfadadu/cs628-assn1/userlib"
 )
 
-type privatekey = userlib.privatekey
+type Privatekey = userlib.PrivateKey
 
-type user_r struct {
-	keyaddr   string
-	signature []byte
-	user
+var BlockSize = userlib.BlockSize
+
+type User_r struct {
+	KeyAddr   string
+	Signature []byte
+	User
 }
 
-type user struct {
-	username string
-	password string
-	privkey  *privatekey
+type User struct {
+	Username string
+	Password string
+	Privkey  *Privatekey
 }
 
 type Inode_r struct {
