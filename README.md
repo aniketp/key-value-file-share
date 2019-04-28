@@ -9,6 +9,17 @@ Made as a part of the assignment for the course Computer Systems Security (CS628
 
 **Note:** The design does not take into account the possibility of Denial of Service attacks or Rollback attacks. In short, availability is not to be secured.
 
+<hr>
+
+#### Group Members
+
+| __Name__ | __Email__ |
+|-------------|------------|
+| Aniket Pandey | [aniketp@iitk.ac.in](mailto:aniketp@iitk.ac.in) |
+| Ashish Kumar | [akashish@iitk.ac.in](mailto:akashish@iitk.ac.in) |
+
 #### Usage and Testing
  * **Frontline** `go run main.go`
  * **Test-cases** `go test -v`
+
+Alternate implementation following the similar design: [aasis21/encrypted_dropbox_](https://github.com/aasis21/encrypted_dropbox_)
